@@ -2,42 +2,45 @@ import numpy as np
 import tensorflow as tf
 from PIL import Image
 
+
 def letterbox_image(image, size):
     iw, ih = image.size
     w, h = size
-    scale = min(w/iw, h/ih)
-    nw = int(iw*scale)
-    nh = int(ih*scale)
+    scale = min(w / iw, h / ih)
+    nw = int(iw * scale)
+    nh = int(ih * scale)
 
-    image = image.resize((nw,nh), Image.BICUBIC)
-    new_image = Image.new('RGB', size, (128,128,128))
-    new_image.paste(image, ((w-nw)//2, (h-nh)//2))
-    x_offset,y_offset = (w-nw)//2/300, (h-nh)//2/300
-    return new_image,x_offset,y_offset
+    image = image.resize((nw, nh), Image.BICUBIC)
+    new_image = Image.new('RGB', size, (128, 128, 128))
+    new_image.paste(image, ((w - nw) // 2, (h - nh) // 2))
+    x_offset, y_offset = (w - nw) // 2 / 300, (h - nh) // 2 / 300
+    return new_image, x_offset, y_offset
+
 
 def ssd_correct_boxes(top, left, bottom, right, input_shape, image_shape):
-    new_shape = image_shape*np.min(input_shape/image_shape)
+    new_shape = image_shape * np.min(input_shape / image_shape)
 
-    offset = (input_shape-new_shape)/2./input_shape
-    scale = input_shape/new_shape
+    offset = (input_shape - new_shape) / 2. / input_shape
+    scale = input_shape / new_shape
 
-    box_yx = np.concatenate(((top+bottom)/2,(left+right)/2),axis=-1)
-    box_hw = np.concatenate((bottom-top,right-left),axis=-1)
+    box_yx = np.concatenate(((top + bottom) / 2, (left + right) / 2), axis=-1)
+    box_hw = np.concatenate((bottom - top, right - left), axis=-1)
 
     box_yx = (box_yx - offset) * scale
     box_hw *= scale
 
     box_mins = box_yx - (box_hw / 2.)
     box_maxes = box_yx + (box_hw / 2.)
-    boxes =  np.concatenate([
+    boxes = np.concatenate([
         box_mins[:, 0:1],
         box_mins[:, 1:2],
         box_maxes[:, 0:1],
         box_maxes[:, 1:2]
-    ],axis=-1)
+    ], axis=-1)
     print(np.shape(boxes))
-    boxes *= np.concatenate([image_shape, image_shape],axis=-1)
+    boxes *= np.concatenate([image_shape, image_shape], axis=-1)
     return boxes
+
 
 class BBoxUtility(object):
     def __init__(self, num_classes, priors=None, overlap_threshold=0.5,
@@ -89,7 +92,7 @@ class BBoxUtility(object):
         # 真实框的面积
         area_true = (box[2] - box[0]) * (box[3] - box[1])
         # 先验框的面积
-        area_gt = (self.priors[:, 2] - self.priors[:, 0])*(self.priors[:, 3] - self.priors[:, 1])
+        area_gt = (self.priors[:, 2] - self.priors[:, 0]) * (self.priors[:, 3] - self.priors[:, 1])
         # 计算iou
         union = area_true + area_gt - inter
 
@@ -106,7 +109,7 @@ class BBoxUtility(object):
             assign_mask[iou.argmax()] = True
         if return_iou:
             encoded_box[:, -1][assign_mask] = iou[assign_mask]
-        
+
         # 找到对应的先验框
         assigned_priors = self.priors[assign_mask]
         # 逆向编码，将真实框转化为ssd预测结果的格式
@@ -119,7 +122,7 @@ class BBoxUtility(object):
                                         assigned_priors[:, 2:4])
         assigned_priors_wh = (assigned_priors[:, 2:4] -
                               assigned_priors[:, :2])
-        
+
         # 逆向求取ssd应该有的预测结果
         encoded_box[:, :2][assign_mask] = box_center - assigned_priors_center
         encoded_box[:, :2][assign_mask] /= assigned_priors_wh
@@ -140,7 +143,7 @@ class BBoxUtility(object):
         encoded_boxes = np.apply_along_axis(self.encode_box, 1, boxes[:, :4])
         # 每一个真实框的编码后的值，和iou
         encoded_boxes = encoded_boxes.reshape(-1, self.num_priors, 5)
-        
+
         # 取重合程度最大的先验框，并且获取这个先验框的index
         best_iou = encoded_boxes[:, :, -1].max(axis=0)
         best_iou_idx = encoded_boxes[:, :, -1].argmax(axis=0)
@@ -150,7 +153,7 @@ class BBoxUtility(object):
         assign_num = len(best_iou_idx)
         # 保留重合程度最大的先验框的应该有的预测结果
         encoded_boxes = encoded_boxes[:, best_iou_mask, :]
-        assignment[:, :4][best_iou_mask] = encoded_boxes[best_iou_idx,np.arange(assign_num),:4]
+        assignment[:, :4][best_iou_mask] = encoded_boxes[best_iou_idx, np.arange(assign_num), :4]
         # 4代表为背景的概率，为0
         assignment[:, 4][best_iou_mask] = 0
         assignment[:, 5:-1][best_iou_mask] = boxes[best_iou_idx, 4:]
@@ -171,7 +174,7 @@ class BBoxUtility(object):
         decode_bbox_center_x += prior_center_x
         decode_bbox_center_y = mbox_loc[:, 1] * prior_height * variances[:, 1]
         decode_bbox_center_y += prior_center_y
-        
+
         # 真实框的宽与高的求取
         decode_bbox_width = np.exp(mbox_loc[:, 2] * variances[:, 2])
         decode_bbox_width *= prior_width
@@ -207,7 +210,7 @@ class BBoxUtility(object):
         # 对每一个特征层进行处理
         for i in range(len(mbox_loc)):
             results.append([])
-            decode_bbox = self.decode_boxes(mbox_loc[i], mbox_priorbox[i],  variances[i])
+            decode_bbox = self.decode_boxes(mbox_loc[i], mbox_priorbox[i], variances[i])
 
             for c in range(self.num_classes):
                 if c == background_label_id:
